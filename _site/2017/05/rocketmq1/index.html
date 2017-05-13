@@ -1,0 +1,91 @@
+<h1 id="section">一、引子</h1>
+<p>MQ是应用开发中最常用的中间件之一了，个人理解研究学习中间件有几个好处，
+* 一方面对中间件特性吃的越透，应用开发过程中无论是技术方案设计、问题排错等多方面都越有裨益
+* 另一方面中间件的代码经受过大业务量的考验，无论在架构设计、编码质量上都有可以学习借鉴的地方。</p>
+
+<p>个人对MQ的理解，就是<strong>两次RPC+一次存储</strong>，在加上其他的一些诸如顺序消息、分布式事务、推拉模式、广播订阅等一些特性。
+metaQ支持顺序消息、分布式事务、push/pull消费、组内广播，功能十分强大。
+<img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/12981/fa889a4443ad8a4d.png" alt="fa889a4443ad8a4d.png" /></p>
+
+<h1 id="rocketmq">二、rocketmq部署架构图</h1>
+<p>Namesrv 名称服务，是没有状态可集群横向扩展。
+1. 每个 broker 启动的时候会向 namesrv 注册
+2. Producer 发送消息的时候根据 topic 获取路由到 broker 的信息
+3. Consumer 根据 topic 到 namesrv 获取 topic 的路由到 broker 的信息.</p>
+
+<p><img src="/images/posts/rocketmq1/rocketmq_tuopu.png" height="800" width="700" /></p>
+
+<h1 id="rocketmq-1">三、rocketmq的特性.</h1>
+
+<h2 id="msgid-">msgId 格式.</h2>
+
+<p>msgId中包含broker地址和msg的offset，便于查找msg.</p>
+
+<p><img src="/images/posts/rocketmq1/rocketmq_msg.png" height="400" width="800" />.</p>
+
+<h2 id="section-1">存储结构</h2>
+<ul>
+  <li>所有消息存储在commitLog文件里，顺序写，随机读</li>
+  <li>Queue里记录消息在commitLog里的offset，串行方式刷盘</li>
+</ul>
+
+<p>这样做的好处是：</p>
+
+<ul>
+  <li>队列轻量化，单个队列的数据量非常少（为什么要队列轻量化？）</li>
+  <li>对磁盘串行访问，避免磁盘竞争，不会因为队列增加导致iowait增高</li>
+</ul>
+
+<p>缺点在于：</p>
+
+<ul>
+  <li>读变成了随机读 （优化读算法，尽量命中pageCache）</li>
+  <li>读一条消息，要先读queue再读commitLog，增加了开销</li>
+  <li>要保证queue和commitLog一致性，增加了编程复杂度</li>
+</ul>
+
+<h3 id="section-2">数据存储结构</h3>
+
+<p><img src="/images/posts/rocketmq1/rocketmq_queue.png" width="900" height="700" /></p>
+
+<h3 id="section-3">存储目录结构.</h3>
+
+<p><img src="/images/posts/rocketmq1/rocketmq_queue_struct.png" width="900" height="1200" /></p>
+
+<h2 id="section-4">刷盘策略</h2>
+<p>我们知道linux写文件并不是直接写到硬盘上的，而是定期刷，这样如果机器down了，有可能尚未刷盘的消息会丢失，metaQ提供了同步/异步两种刷盘方式，按需选择吧
+<img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/12981/3fcfd146c73eb54e.png" alt="3fcfd146c73eb54e.png" /> 
+<img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/12981/b2e24185237cf61d.png" alt="b2e24185237cf61d.png" /></p>
+
+<h2 id="section-5">顺序消息</h2>
+<p>metaQ支持顺序消息，担要求producer保证消息按顺序发送到同一个queue，比如msg1、msg2、msg3三个消息，如果要顺序到达consumer，则需要在producer发送时，按照特定规则，将消息发送到同一个queue。</p>
+
+<p><strong>如何把书序消息发送到一个queue</strong>.</p>
+
+<p>普通消息是通过轮询所有队列发送，顺序消息可以根据业务id，比如相同的orderId发送同一个queue，或者同一个userId发送同一个queue.</p>
+
+<p>messageQueueList[orderId%messageQueueList.size()].</p>
+
+<p>messageQueueList[userId%messageQueueList.size()]</p>
+
+<h2 id="section-6">事务消息（待完善）.</h2>
+
+<p>事务消息采用<strong>二阶段</strong>做法来做.</p>
+
+<p><img src="/images/posts/rocketmq1/trancation_msg.png" width="1200" height="1000" /></p>
+
+<h2 id="pushpull">push/pull消费</h2>
+<p>MQ中消费端获取消息有push、pull两种，各有利弊。</p>
+
+<p><strong>PUSH</strong>：broker推送消息到consumer进行消费。这种模式下最大的问题是<strong>慢消费</strong>的问题，如果consumer消费能力抵不上broker推送消息，broker推过来消息，consumer因为消费不了而reject或者error，如果这些消息又是不可丢弃的，可能会在broker和consumer来回“踢皮球”。</p>
+
+<p><strong>pull</strong>：consumer主动去broker进行拉取。这种模式下，consumer可以按需拉取，broker甚至不需要记录消息状态，只需要维护消息偏移量。但是弊端在于consumer如果拉取不到消息，重新拉取要等多久就很难衡量了，频次低了可能消息处理不及时，频次高了对服务端可能造成损伤，同时也可能多次拉取都是空拉。</p>
+
+<p>MetaQ中consumer都是从broker拉消息的，为了保证接收的实时性，采用了长轮询的方式。</p>
+
+<h2 id="section-7">组内广播</h2>
+<p>rocketMQ支持组内广播，比如应用A有10台机器，订阅了某个topic，广播方式可以使得10台机器都收到消息。
+广播的代价比较高，投递比可能达到1：1000，生产环境订阅广播消息，需要根据消息量和consumer规模严格审核评估。</p>
+
+<h2 id="section-8">定时消息（待完善）</h2>
+
