@@ -4,7 +4,7 @@
 * 另一方面中间件的代码经受过大业务量的考验，无论在架构设计、编码质量上都有可以学习借鉴的地方。</p>
 
 <p>个人对MQ的理解，就是<strong>两次RPC+一次存储</strong>，在加上其他的一些诸如顺序消息、分布式事务、推拉模式、广播订阅等一些特性。
-metaQ支持顺序消息、分布式事务、push/pull消费、组内广播，功能十分强大。
+rocketmq支持顺序消息、分布式事务、push/pull消费、组内广播，功能十分强大。
 <img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/12981/fa889a4443ad8a4d.png" alt="fa889a4443ad8a4d.png" /></p>
 
 <h1 id="rocketmq">二、rocketmq部署架构图</h1>
@@ -44,21 +44,21 @@ metaQ支持顺序消息、分布式事务、push/pull消费、组内广播，功
   <li>要保证queue和commitLog一致性，增加了编程复杂度</li>
 </ul>
 
-<h3 id="section-2">数据存储结构</h3>
+<h2 id="section-2">数据存储结构</h2>
 
 <p><img src="/images/posts/rocketmq1/rocketmq_queue.png" width="900" height="700" /></p>
 
-<h3 id="section-3">存储目录结构.</h3>
+<h2 id="section-3">存储目录结构.</h2>
 
 <p><img src="/images/posts/rocketmq1/rocketmq_queue_struct.png" width="900" height="1200" /></p>
 
 <h2 id="section-4">刷盘策略</h2>
-<p>我们知道linux写文件并不是直接写到硬盘上的，而是定期刷，这样如果机器down了，有可能尚未刷盘的消息会丢失，metaQ提供了同步/异步两种刷盘方式，按需选择吧
-<img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/12981/3fcfd146c73eb54e.png" alt="3fcfd146c73eb54e.png" /> 
-<img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/12981/b2e24185237cf61d.png" alt="b2e24185237cf61d.png" /></p>
+<p>我们知道linux写文件并不是直接写到硬盘上的，而是定期刷，这样如果机器down了，有可能尚未刷盘的消息会丢失，rocketmq提供了同步/异步两种刷盘方式，按需选择吧. 
+<img src="/images/posts/rocketmq1/syn_flush.png" width="300" height="500" />. 
+<img src="/images/posts/rocketmq1/asyn_flush.png" width="300" height="500" />.</p>
 
 <h2 id="section-5">顺序消息</h2>
-<p>metaQ支持顺序消息，担要求producer保证消息按顺序发送到同一个queue，比如msg1、msg2、msg3三个消息，如果要顺序到达consumer，则需要在producer发送时，按照特定规则，将消息发送到同一个queue。</p>
+<p>rocketmq支持顺序消息，担要求producer保证消息按顺序发送到同一个queue，比如msg1、msg2、msg3三个消息，如果要顺序到达consumer，则需要在producer发送时，按照特定规则，将消息发送到同一个queue。</p>
 
 <p><strong>如何把书序消息发送到一个queue</strong>.</p>
 
@@ -81,7 +81,7 @@ metaQ支持顺序消息、分布式事务、push/pull消费、组内广播，功
 
 <p><strong>pull</strong>：consumer主动去broker进行拉取。这种模式下，consumer可以按需拉取，broker甚至不需要记录消息状态，只需要维护消息偏移量。但是弊端在于consumer如果拉取不到消息，重新拉取要等多久就很难衡量了，频次低了可能消息处理不及时，频次高了对服务端可能造成损伤，同时也可能多次拉取都是空拉。</p>
 
-<p>MetaQ中consumer都是从broker拉消息的，为了保证接收的实时性，采用了长轮询的方式。</p>
+<p>rocketmq中consumer都是从broker拉消息的，为了保证接收的实时性，采用了长轮询的方式。</p>
 
 <h2 id="section-7">组内广播</h2>
 <p>rocketMQ支持组内广播，比如应用A有10台机器，订阅了某个topic，广播方式可以使得10台机器都收到消息。
